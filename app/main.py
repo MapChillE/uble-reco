@@ -1,7 +1,12 @@
 from fastapi import FastAPI
+from app.api import vector, recommend
+from app.database.connection import Base, engine
 
 app = FastAPI()
 
-@app.get("/")
-def read_root():
-    return {"Hello":"World"}
+# DB 모델 생성
+Base.metadata.create_all(bind=engine)
+
+app.include_router(vector.router, prefix="/api")
+app.include_router(recommend.router, prefix="/api")
+
