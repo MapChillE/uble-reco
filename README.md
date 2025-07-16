@@ -1,6 +1,6 @@
 # 가상환경 생성
 
-python -m venv venv
+python@3.13 -m venv venv
 
 # 가상환경 활성화(윈도우)
 
