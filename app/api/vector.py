@@ -4,7 +4,7 @@ from sqlalchemy.sql import text
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from app.database.connection import get_db
-from app.models import Store, User, UsageHistory, Category, Brand, StoreEmbedding
+from app.models import Store, User, UsageHistory, Category, Brand, StoreEmbedding, BrandEmbedding
 from typing import List
 from datetime import datetime
 
@@ -41,3 +41,30 @@ def generate_store_vectors(db: Session = Depends(get_db)):
 
     db.commit()
     return {"message": f"{count} store vectors created or updated"}
+
+@router.post("/vectors/brand")
+def generate_brand_vectors(db: Session = Depends(get_db)):
+    brands = db.query(Brand).filter(Brand.description != None).all()
+    count = 0
+
+    for brand in brands:
+        category_name = brand.category.name if brand.category else ""
+        combined_text = f"{brand.name or ''} . {brand.description or ''}. {category_name}"
+        print("combined_text: ", combined_text)
+        vec = model.encode(combined_text).tolist()
+
+        existing = db.query(BrandEmbedding).filter(BrandEmbedding.brand_id == brand.id).first()
+        if existing:
+            existing.embedding = vec
+            existing.updated_at = datetime.utcnow()
+        else:
+            db.add(BrandEmbedding(
+                brand_id=brand.id,
+                embedding=vec,
+                updated_at=datetime.utcnow()
+            ))
+        count += 1
+    db.commit()
+    return {"message": f"{count} brand vectors created or updated"}
+
+        

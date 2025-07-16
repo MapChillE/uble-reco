@@ -25,7 +25,8 @@ class Brand(Base):
     benefits = relationship("Benefit", back_populates="brand")
     stores = relationship("Store", back_populates="brand")
     bookmarks = relationship("Bookmark", back_populates="brand")
-
+    click_logs = relationship("BrandClickLog", back_populates="brand", cascade="all, delete-orphan")
+    embedding = relationship("BrandEmbedding", uselist=False, back_populates="brand")
 
 class Benefit(Base):
     __tablename__ = "benefit"
@@ -68,7 +69,7 @@ class Store(Base):
     brand = relationship("Brand", back_populates="stores")
     usage_histories = relationship("UsageHistory", back_populates="store")
     embedding_info = relationship("StoreEmbedding", back_populates="store", uselist=False)
-
+    click_logs = relationship("StoreClickLog", back_populates="store", cascade="all, delete-orphan")
 
 class User(Base):
     __tablename__ = "users"
@@ -92,7 +93,8 @@ class User(Base):
     usage_histories = relationship("UsageHistory", back_populates="user")
     user_categories = relationship("UserCategory", back_populates="user")
     usage_counts = relationship("UsageCount", back_populates="user")
-
+    brand_click_logs = relationship("BrandClickLog", back_populates="user", cascade="all, delete-orphan")
+    store_click_logs = relationship("StoreClickLog", back_populates="user", cascade="all, delete-orphan")
 
 class Bookmark(Base):
     __tablename__ = "bookmark"
@@ -195,17 +197,38 @@ class StoreEmbedding(Base):
 
     store = relationship("Store", back_populates = "embedding_info")
 
+class BrandEmbedding(Base):
+    __tablename__ = "brand_embedding"
 
-class ClickLog(Base):
-    __tablename__ = "click_log"
+    id = Column(BigInteger, primary_key=True, index=True)
+    brand_id = Column(BigInteger, ForeignKey("brand.id"), unique=True, nullable=False)
+    embedding = Column(Vector(384))
+    updated_at = Column(TIMESTAMP)
 
-    id = Column(BigInteger, primary_key=True)
+    brand = relationship("Brand", back_populates="embedding")
+
+class BrandClickLog(Base):
+    __tablename__ = "brand_click_log"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
+    brand_id = Column(BigInteger, ForeignKey("brand.id"), nullable=False)
     created_at = Column(TIMESTAMP)
-    user_id = Column(BigInteger, ForeignKey("users.id"))
-    store_id = Column(BigInteger, ForeignKey("store.id"))
 
-    user = relationship("User")
-    store = relationship("Store")
+    user = relationship("User", back_populates="brand_click_logs")
+    brand = relationship("Brand", back_populates="click_logs")
+
+
+class StoreClickLog(Base):
+    __tablename__ = "store_click_log"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=False)
+    store_id = Column(BigInteger, ForeignKey("store.id"), nullable=False)
+    created_at = Column(TIMESTAMP)
+
+    user = relationship("User", back_populates="store_click_logs")
+    store = relationship("Store", back_populates="click_logs")
 
 
 class SearchLog(Base):
