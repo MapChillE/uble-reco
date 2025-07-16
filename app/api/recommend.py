@@ -40,7 +40,7 @@ def recommend(
     """), {"user_id": user_id}).scalars().all()
 
     clicks = db.execute(text("""
-        SELECT s.name FROM click_log cl
+        SELECT s.name FROM store_click_log cl
         JOIN store s ON cl.store_id = s.id
         WHERE cl.user_id = :user_id
     """), {"user_id": user_id}).scalars().all()
@@ -60,13 +60,13 @@ def recommend(
     sql = text("""
         SELECT s.id, s.name, s.address,
                1 - (embedding <-> CAST(:user_vec AS vector)) AS similarity,
-               (SELECT COUNT(*) FROM click_log WHERE store_id = s.id) AS click_score,
+               (SELECT COUNT(*) FROM store_click_log WHERE store_id = s.id) AS click_score,
                (SELECT COUNT(*) FROM usage_history WHERE store_id = s.id) AS visit_score
         FROM store_embedding se
         JOIN store s ON se.store_id = s.id
         WHERE ST_DWithin(s.location, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography, :radius)
         ORDER BY 0.7 * (1 - (embedding <-> CAST(:user_vec AS vector))) + 0.3 * (
-            (SELECT COUNT(*) FROM click_log WHERE store_id = s.id)::float / 10
+            (SELECT COUNT(*) FROM store_click_log WHERE store_id = s.id)::float / 10
         ) DESC
         LIMIT 10
     """)
