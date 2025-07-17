@@ -95,6 +95,7 @@ class User(Base):
     usage_counts = relationship("UsageCount", back_populates="user")
     brand_click_logs = relationship("BrandClickLog", back_populates="user", cascade="all, delete-orphan")
     store_click_logs = relationship("StoreClickLog", back_populates="user", cascade="all, delete-orphan")
+    search_logs = relationship("SearchLog", back_populates="user", cascade="all, delete-orphan")
 
 class Bookmark(Base):
     __tablename__ = "bookmark"
@@ -186,6 +187,7 @@ class UserCategory(Base):
     user_id = Column(BigInteger, ForeignKey("users.id"))
 
     user = relationship("User", back_populates="user_categories")
+    category = relationship("Category")
 
 
 class StoreEmbedding(Base):
@@ -239,4 +241,4 @@ class SearchLog(Base):
     user_id = Column(BigInteger, ForeignKey("users.id"))
     keyword = Column(String)
 
-    user = relationship("User")
+    user = relationship("User", back_populates="search_logs")

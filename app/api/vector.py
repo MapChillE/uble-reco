@@ -1,11 +1,8 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import text
-import numpy as np
 from sentence_transformers import SentenceTransformer
 from app.database.connection import get_db
-from app.models import Store, User, UsageHistory, Category, Brand, StoreEmbedding, BrandEmbedding
-from typing import List
+from app.models import Store, Brand, StoreEmbedding, BrandEmbedding
 from datetime import datetime
 
 router = APIRouter()
@@ -14,7 +11,12 @@ model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniL
 
 @router.post("/vectors/store")
 def generate_store_vectors(db: Session = Depends(get_db)):
-    stores = db.query(Store).join(Store.brand).filter(Store.brand.has(Brand.description != None)).all()
+    stores =( 
+        db.query(Store)
+        .join(Store.brand)
+        .filter(Store.brand.has(Brand.description.isnot(None)))
+        .all()
+    )
     count = 0
 
     for store in stores:
@@ -50,7 +52,6 @@ def generate_brand_vectors(db: Session = Depends(get_db)):
     for brand in brands:
         category_name = brand.category.name if brand.category else ""
         combined_text = f"{brand.name or ''} . {brand.description or ''}. {category_name}"
-        print("combined_text: ", combined_text)
         vec = model.encode(combined_text).tolist()
 
         existing = db.query(BrandEmbedding).filter(BrandEmbedding.brand_id == brand.id).first()

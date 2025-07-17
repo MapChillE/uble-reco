@@ -4,9 +4,6 @@ from app.database.connection import Base, engine
 
 app = FastAPI()
 
-# DB 모델 생성
-Base.metadata.create_all(bind=engine)
-
 app.include_router(vector.router, prefix="/api")
 app.include_router(recommend.router, prefix="/api")
 

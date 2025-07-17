@@ -3,8 +3,7 @@ import pandas as pd
 from scipy.sparse import coo_matrix
 from implicit.als import AlternatingLeastSquares
 from sqlalchemy.orm import Session
-from app.models import BrandClickLog, StoreClickLog, BrandEmbedding, Store, Brand
-from app.database.connection import get_db
+from app.models import BrandClickLog, StoreClickLog, BrandEmbedding, Store
 
 class HybridRecommender:
     def __init__(self):
@@ -21,11 +20,19 @@ class HybridRecommender:
         combined_data = []
 
         # Store 클릭 로그 : brand_id로 매핑
+        store_ids = [log.store_id for log in store_logs]
+        stores_with_brands = db.query(Store.id, Store.brand_id).filter(
+            Store.id.in_(store_ids),
+            Store.brand_id.isnot(None)
+        ).all()
+
+        store_to_brand = {store_id: brand_id for store_id, brand_id in stores_with_brands}
+
         for log in store_logs:
-            store = db.query(Store).filter(Store.id == log.store_id).first()
-            if store and store.brand_id:
-                combined_data.append({'user_id': log.user_id, 'brand_id': store.brand_id})
-        
+            brand_id = store_to_brand.get(log.store_id)
+            if brand_id:
+                combined_data.append({'user_id': log.user_id, 'brand_id': brand_id})
+
         # Brand 클릭 로그
         for log in brand_logs:
             combined_data.append({'user_id': log.user_id, 'brand_id': log.brand_id}) 
@@ -97,6 +104,5 @@ class HybridRecommender:
             hybrid_scores[bid] = 0.5 * als + 0.5 * vec
 
         sorted_scores = sorted(hybrid_scores.items(), key=lambda x: x[1], reverse=True)
-        print("후보군!!")
-        print(sorted_scores[:top_k])
+
         return sorted_scores[:top_k]

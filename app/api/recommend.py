@@ -6,11 +6,13 @@ from app.database.connection import get_db
 from app.models import Store
 from app.services.recommend_service import HybridRecommender
 from geoalchemy2.functions import ST_DWithin, ST_SetSRID, ST_MakePoint
-
+import logging
+from app.services.collect_user_data import collect_user_data
 
 router = APIRouter()
 model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 recommender = HybridRecommender()
+logger = logging.getLogger(__name__)
 
 @router.get("/recommend")
 def recommend(
@@ -21,33 +23,7 @@ def recommend(
     db:Session = Depends(get_db)
     ):
     # 1. 사용자 정보 수집
-    categories = db.execute(text("""
-        SELECT c.name FROM user_category uc
-        JOIN category c ON uc.category_id = c.id
-        WHERE uc.user_id = :user_id
-    """), {"user_id": user_id}).scalars().all()
-
-    histories = db.execute(text("""
-        SELECT s.name FROM usage_history uh
-        JOIN store s ON uh.store_id = s.id
-        WHERE uh.user_id = :user_id
-    """), {"user_id": user_id}).scalars().all()
-
-    bookmarks = db.execute(text("""
-        SELECT b.description FROM bookmark bm
-        JOIN brand b ON bm.brand_id = b.id
-        WHERE bm.user_id = :user_id
-    """), {"user_id": user_id}).scalars().all()
-
-    clicks = db.execute(text("""
-        SELECT s.name FROM store_click_log cl
-        JOIN store s ON cl.store_id = s.id
-        WHERE cl.user_id = :user_id
-    """), {"user_id": user_id}).scalars().all()
-
-    searches = db.execute(text("""
-        SELECT keyword FROM search_log WHERE user_id = :user_id
-    """), {"user_id": user_id}).scalars().all()
+    categories, histories, bookmarks, clicks, searches = collect_user_data(user_id, db)
 
     if not (categories or histories or bookmarks or clicks or searches):
         raise HTTPException(status_code=404, detail="사용자 정보가 부족합니다.")
@@ -58,15 +34,36 @@ def recommend(
 
     # 3. pgvector를 활용한 유사도 계산
     sql = text("""
+        WITH click_counts AS (
+        SELECT store_id, COUNT(*) AS click_count
+        FROM store_click_log
+        GROUP BY store_id
+        ),
+        click_stats AS (
+            SELECT MAX(click_count) AS max_clicks,
+                MIN(click_count) AS min_clicks
+            FROM click_counts
+        )
         SELECT s.id, s.name, s.address,
-               1 - (embedding <-> CAST(:user_vec AS vector)) AS similarity,
-               (SELECT COUNT(*) FROM store_click_log WHERE store_id = s.id) AS click_score,
-               (SELECT COUNT(*) FROM usage_history WHERE store_id = s.id) AS visit_score
+            1 - (embedding <-> CAST(:user_vec AS vector)) AS similarity,
+            COALESCE(cc.click_count, 0) AS click_score,
+            (SELECT COUNT(*) FROM usage_history WHERE store_id = s.id) AS visit_score,
+            CASE 
+                WHEN cs.max_clicks > cs.min_clicks THEN 
+                    (COALESCE(cc.click_count, 0) - cs.min_clicks)::float / NULLIF(cs.max_clicks - cs.min_clicks, 0)
+                ELSE 0
+            END AS normalized_click_score
         FROM store_embedding se
         JOIN store s ON se.store_id = s.id
+        LEFT JOIN click_counts cc ON cc.store_id = s.id
+        CROSS JOIN click_stats cs
         WHERE ST_DWithin(s.location, ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)::geography, :radius)
         ORDER BY 0.7 * (1 - (embedding <-> CAST(:user_vec AS vector))) + 0.3 * (
-            (SELECT COUNT(*) FROM store_click_log WHERE store_id = s.id)::float / 10
+            CASE 
+                WHEN cs.max_clicks > cs.min_clicks THEN 
+                    (COALESCE(cc.click_count, 0) - cs.min_clicks)::float / NULLIF(cs.max_clicks - cs.min_clicks, 0)
+                ELSE 0
+            END
         ) DESC
         LIMIT 10
     """)
@@ -94,33 +91,7 @@ def hybrid_recommend(
     db: Session = Depends(get_db)
 ):
     # 1. 사용자 텍스트 정보 수집
-    categories = db.execute(text("""
-        SELECT c.name FROM user_category uc
-        JOIN category c ON uc.category_id = c.id
-        WHERE uc.user_id = :user_id
-    """), {"user_id": user_id}).scalars().all()
-
-    histories = db.execute(text("""
-        SELECT s.name FROM usage_history uh
-        JOIN store s ON uh.store_id = s.id
-        WHERE uh.user_id = :user_id
-    """), {"user_id": user_id}).scalars().all()
-
-    bookmarks = db.execute(text("""
-        SELECT b.description FROM bookmark bm
-        JOIN brand b ON bm.brand_id = b.id
-        WHERE bm.user_id = :user_id
-    """), {"user_id": user_id}).scalars().all()
-
-    clicks = db.execute(text("""
-        SELECT s.name FROM store_click_log cl
-        JOIN store s ON cl.store_id = s.id
-        WHERE cl.user_id = :user_id
-    """), {"user_id": user_id}).scalars().all()
-
-    searches = db.execute(text("""
-        SELECT keyword FROM search_log WHERE user_id = :user_id
-    """), {"user_id": user_id}).scalars().all()
+    categories, histories, bookmarks, clicks, searches = collect_user_data(user_id, db)
 
     if not (categories or histories or bookmarks or clicks or searches):
         raise HTTPException(status_code=404, detail="사용자 정보가 부족합니다.")
@@ -132,7 +103,7 @@ def hybrid_recommend(
     # 3. 추천 결과 계산
     results = recommender.get_hybrid_scores(db, user_id, user_vec)
     recommended_brand_ids = [brand_id for brand_id, _ in results]
-    print(results)
+    logger.debug(f"Recommendation results for user {user_id}: {results}")
 
     # 4. 위치 기반 필터링: 추천 브랜드 매장 중 반경 km 이내
     nearby_stores = db.query(Store).filter(
