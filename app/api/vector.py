@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session, joinedload
 from sentence_transformers import SentenceTransformer
 from app.database.connection import get_db
 from app.models import Store, Brand, StoreEmbedding, BrandEmbedding
@@ -16,7 +16,7 @@ def generate_store_vectors(db: Session = Depends(get_db)):
             db.query(Store)
             .join(Store.brand)
             .filter(Store.brand.has(Brand.description.isnot(None)))
-            .options(joinedload(Store.brand).joinedload(Brand.Category))
+            .options(joinedload(Store.brand).joinedload(Brand.category))
             .all()
         )
     except Exception as e:
@@ -53,7 +53,7 @@ def generate_store_vectors(db: Session = Depends(get_db)):
     if embeddings_to_update:
         db.bulk_update_mappings(StoreEmbedding, embeddings_to_update)
     if embeddings_to_insert:
-        db.bult_save_objects(embeddings_to_insert)
+        db.bulk_save_objects(embeddings_to_insert)
 
     db.commit()
     return {"message": f"{count} store vectors created or updated"}
