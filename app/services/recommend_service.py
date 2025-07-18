@@ -67,16 +67,26 @@ class HybridRecommender:
         self.model = AlternatingLeastSquares(factors=50, regularization=0.01, iterations=20)
         self.model.fit(sparse_matrix)
 
+        self.user_items = sparse_matrix.tocsr()
         self.user_factors = self.model.user_factors
         self.item_factors = self.model.item_factors
 
-    def get_als_scores(self, user_id: int, top_k: int = 10):
+    def get_als_scores(self, user_id: int, top_k: int = 20):
         if not self.model or user_id not in self.user_id_to_code:
             return {}
         user_code = self.user_id_to_code[user_id]
-        scores = self.model.recommend(userid=user_code, user_items=self.model.user_items[user_code], N=top_k, filter_already_liked_items=False)
-        return {self.index_to_item_id[item_idx]: score for item_idx, score in scores}
+        indices, values = self.model.recommend(
+            userid=user_code,
+            user_items=self.user_items[user_code],
+            N=top_k,
+            filter_already_liked_items=False
+        )
 
+        return {
+            self.index_to_item_id[int(idx)]: float(score)
+            for idx, score in zip(indices, values)
+            if int(idx) in self.index_to_item_id
+        }       
     def get_vector_scores(self, db: Session, user_vec: list, top_k: int = 10):
         embeddings = db.query(BrandEmbedding).all()
         scores = []
