@@ -21,8 +21,6 @@ def generate_store_vectors(db: Session = Depends(get_db)):
 
     for store in stores:
         brand = store.brand
-        if not brand:
-            continue
 
         category_name = brand.category.name if brand.category else ""
         combined_text = f"{brand.name or ''}. {brand.description or ''}. {category_name}"
