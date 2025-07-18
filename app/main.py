@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from app.api import vector, recommend
-from app.database.connection import Base, engine
 
 app = FastAPI()
 
