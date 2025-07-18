@@ -46,7 +46,7 @@ def generate_store_vectors(db: Session = Depends(get_db)):
 
 @router.post("/vectors/brand")
 def generate_brand_vectors(db: Session = Depends(get_db)):
-    brands = db.query(Brand).filter(Brand.description != None).all()
+    brands = db.query(Brand).filter(Brand.description.isnot(None)).all()
     count = 0
 
     for brand in brands:
