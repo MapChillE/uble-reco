@@ -60,8 +60,15 @@ def generate_store_vectors(db: Session = Depends(get_db)):
 
 @router.post("/vectors/brand")
 def generate_brand_vectors(db: Session = Depends(get_db)):
-    brands = db.query(Brand).filter(Brand.description.isnot(None)).all()
+    try:
+        brands = db.query(Brand).filter(Brand.description.isnot(None)).all()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
     count = 0
+
+    embeddings_to_update = []
+    embeddings_to_insert = []
 
     for brand in brands:
         category_name = brand.category.name if brand.category else ""
@@ -70,15 +77,24 @@ def generate_brand_vectors(db: Session = Depends(get_db)):
 
         existing = db.query(BrandEmbedding).filter(BrandEmbedding.brand_id == brand.id).first()
         if existing:
-            existing.embedding = vec
-            existing.updated_at = datetime.utcnow()
+            embeddings_to_update.append({
+                'brand_id': brand.id,
+                'embedding': vec,
+                'updated_at': datetime.utcnow()
+            })
         else:
-            db.add(BrandEmbedding(
+            embeddings_to_insert.append(BrandEmbedding(
                 brand_id=brand.id,
                 embedding=vec,
                 updated_at=datetime.utcnow()
             ))
         count += 1
+    
+    if embeddings_to_update:
+        db.bulk_update_mappings(BrandEmbedding, embeddings_to_update)
+    if embeddings_to_insert:
+        db.bulk_save_objects(embeddings_to_insert)
+
     db.commit()
     return {"message": f"{count} brand vectors created or updated"}
 
