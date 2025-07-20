@@ -38,6 +38,7 @@ def generate_store_vectors(db: Session = Depends(get_db)):
         existing = db.query(StoreEmbedding).filter(StoreEmbedding.store_id == store.id).first()
         if existing:
             embeddings_to_update.append({
+                'id': existing.id,
                 'store_id': store.id,
                 'embedding': vec,
                 'updated_at': datetime.utcnow()
@@ -78,6 +79,7 @@ def generate_brand_vectors(db: Session = Depends(get_db)):
         existing = db.query(BrandEmbedding).filter(BrandEmbedding.brand_id == brand.id).first()
         if existing:
             embeddings_to_update.append({
+                'id': existing.id,
                 'brand_id': brand.id,
                 'embedding': vec,
                 'updated_at': datetime.utcnow()
