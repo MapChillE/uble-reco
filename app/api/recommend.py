@@ -103,12 +103,10 @@ def hybrid_recommend(
 
     # 0. Redis 캐시 확인
     cache_key = f"recommendation:user:{user_id}"
-    print(cache_key)
     try:
         cached = r.get(cache_key)
         if cached:
             return json.loads(cached)
-        print("cache 확인 끝")
     except Exception as e:
         logger.error(f"Redis 캐시 확인 중 오류: {e}")
 
