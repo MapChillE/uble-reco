@@ -21,11 +21,17 @@ def generate_store_vectors(db: Session = Depends(get_db)):
         )
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}") from e
     count = 0
 
     embeddings_to_update = []
     embeddings_to_insert = []
+
+    store_ids = [store.id for store in stores]
+    existing_embeddings = {
+        emb.store_id: emb for emb in 
+        db.query(StoreEmbedding).filter(StoreEmbedding.store_id.in_(store_ids)).all()
+    }
 
     for store in stores:
         brand = store.brand
@@ -35,7 +41,8 @@ def generate_store_vectors(db: Session = Depends(get_db)):
 
         vec = model.encode(combined_text).tolist()
 
-        existing = db.query(StoreEmbedding).filter(StoreEmbedding.store_id == store.id).first()
+        existing = existing_embeddings.get(store.id)
+
         if existing:
             embeddings_to_update.append({
                 'id': existing.id,
@@ -62,21 +69,34 @@ def generate_store_vectors(db: Session = Depends(get_db)):
 @router.post("/vectors/brand")
 def generate_brand_vectors(db: Session = Depends(get_db)):
     try:
-        brands = db.query(Brand).filter(Brand.description.isnot(None)).all()
+        brands = (
+            db.query(Brand)
+            .filter(Brand.description.isnot(None))
+            .options(joinedload(Brand.category))
+            .all()
+        )
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}") from e
     count = 0
 
     embeddings_to_update = []
     embeddings_to_insert = []
 
+    brand_ids = [brand.id for brand in brands]
+    existing_embeddings = {
+        emb.brand_id: emb for emb in
+        db.query(BrandEmbedding).filter(BrandEmbedding.brand_id.in_(brand_ids)).all()
+    }
+
     for brand in brands:
         category_name = brand.category.name if brand.category else ""
         combined_text = f"{brand.name or ''}. {brand.description or ''}. {category_name}"
+
         vec = model.encode(combined_text).tolist()
 
-        existing = db.query(BrandEmbedding).filter(BrandEmbedding.brand_id == brand.id).first()
+        existing = existing_embeddings.get(brand.id)
+
         if existing:
             embeddings_to_update.append({
                 'id': existing.id,
