@@ -5,14 +5,23 @@ from sqlalchemy import text
 from app.database.connection import get_db
 from app.models import Store
 from app.services.recommend_service import HybridRecommender
-from geoalchemy2.functions import ST_DWithin, ST_SetSRID, ST_MakePoint
+from geoalchemy2.functions import ST_DWithin, ST_SetSRID, ST_MakePoint, ST_Distance
 import logging
 from app.services.collect_user_data import collect_user_data
+from collections import defaultdict
+from app.database.redis_client import r
+import json
 
 router = APIRouter()
 model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 recommender = HybridRecommender()
 logger = logging.getLogger(__name__)
+
+def get_min_rank(benefits: list) -> str:
+    for b in benefits:
+        if b.rank != "NONE":
+            return b.rank
+    return "NONE"
 
 @router.get("/recommend")
 def recommend(
@@ -22,6 +31,7 @@ def recommend(
     radius_km: float = Query(2.0),
     db:Session = Depends(get_db)
     ):
+
     # 1. 사용자 정보 수집
     categories, histories, bookmarks, clicks, searches = collect_user_data(user_id, db)
 
@@ -85,11 +95,23 @@ def startup_event():
 @router.get("/recommend/hybrid")
 def hybrid_recommend(
     user_id: int, 
-    lat: float = Query(...),
-    lng: float = Query(...),
+    lat: float = Query(37.5),
+    lng: float = Query(127.04),
     radius_km: float = Query(2.0),
     db: Session = Depends(get_db)
 ):
+
+    # 0. Redis 캐시 확인
+    cache_key = f"recommendation:user:{user_id}"
+    print(cache_key)
+    try:
+        cached = r.get(cache_key)
+        if cached:
+            return json.loads(cached)
+        print("cache 확인 끝")
+    except Exception as e:
+        logger.error(f"Redis 캐시 확인 중 오류: {e}")
+
     # 1. 사용자 텍스트 정보 수집
     categories, histories, bookmarks, clicks, searches = collect_user_data(user_id, db)
 
@@ -107,23 +129,44 @@ def hybrid_recommend(
 
     # 4. 위치 기반 필터링: 추천 브랜드 매장 중 반경 km 이내
     nearby_stores = db.query(Store).filter(
-        Store.brand_id.in_(recommended_brand_ids),
-        ST_DWithin(Store.location, ST_SetSRID(ST_MakePoint(lng, lat), 4326), radius_km * 1000)
+    Store.brand_id.in_(recommended_brand_ids),
+    ST_DWithin(Store.location, ST_SetSRID(ST_MakePoint(lng, lat), 4326), radius_km * 1000)
+    ).order_by(
+        ST_Distance(Store.location, ST_SetSRID(ST_MakePoint(lng, lat), 4326))
     ).all()
 
     # 매장 중 하나씩 결과 연결
     store_map = {}
+    brand_store_map = defaultdict(list)
     for store in nearby_stores:
-        if store.brand_id not in store_map:
-            store_map[store.brand_id] = store
+        brand_store_map[store.brand_id].append(store)
+    store_map = {bid: stores[0] for bid, stores in brand_store_map.items()}
 
-    # 결과 반환
-    return [
-        {
-            "store_id": store_map[bid].id,
-            "name": store_map[bid].name,
-            "address": store_map[bid].address,
-            "score": round(score, 4)
+    # 5. 결과 구성
+    recommendation_items = []
+    for brand_id, score in results:
+        if brand_id not in store_map:
+            continue
+        store = store_map[brand_id]
+        brand = store.brand
+
+        item = {
+            "storeId": store.id,
+            "storeName": store.name,
+            "category": brand.category.name if brand.category else None,
+            "description": brand.description,
+            "isVIPcock": brand.rank_type in ("VIP", "VIP_NORMAL"),
+            "minRank": get_min_rank(brand.benefits),
+            "imgUrl": brand.image_url
         }
-        for bid, score in results if bid in store_map
-    ]
+        recommendation_items.append(item)
+    final_results = {"recommendationsList": recommendation_items}
+
+    # 6. 캐시 저장 (1시간)
+    try:
+        r.setex(cache_key, 3600, json.dumps(final_results))
+    except Exception as e:
+        logger.error(f"Redis 캐싱 실패: {e}")
+
+    # 7. 결과 반환
+    return final_results
