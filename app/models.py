@@ -193,6 +193,7 @@ class UserCategory(Base):
 class StoreEmbedding(Base):
     __tablename__ = "store_embedding"
 
+    id = Column(BigInteger, primary_key=True, index=True)
     store_id = Column(BigInteger, ForeignKey("store.id"), primary_key=True)
     embedding = Column(Vector(384))
     updated_at = Column(TIMESTAMP)
