@@ -7,6 +7,10 @@ from app.models import BrandClickLog, StoreClickLog, BrandEmbedding, Store
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import scan
 from app.database.es import es
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class HybridRecommender:
     def __init__(self):
@@ -22,8 +26,11 @@ class HybridRecommender:
     # 로그 가져오는 함수
     def get_logs_from_es(self, index_name: str):
         logs = []
-        for doc in scan(self.es, index=index_name):
-            logs.append(doc["_source"])
+        try:
+            for doc in scan(self.es, index=index_name):
+                logs.append(doc["_source"])
+        except Exception as e:
+            logger.error(f"Elasticsearch 로그 조회 실패 (index: {index_name}): {e}")
         return logs
 
     def train_model(self, db: Session):
@@ -44,7 +51,7 @@ class HybridRecommender:
         for log in store_logs:
             brand_id = store_to_brand.get(log["storeId"])
             if brand_id:
-                combined_data.append({'user_id': log["userId"], "brand_id": log["brandId"]})
+                combined_data.append({'user_id': log["userId"], "brand_id": brand_id})
 
         # Brand 클릭 로그
         for log in brand_logs:

@@ -2,6 +2,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import scan
+import logging
+
+logger = logging.getLogger(__name__)
 
 def collect_user_data(user_id: int, db: Session, es: Elasticsearch) -> tuple[list, list, list, list, list]:
     
@@ -26,28 +29,33 @@ def collect_user_data(user_id: int, db: Session, es: Elasticsearch) -> tuple[lis
 
     # es에서 가져오는 클릭 로그
     clicks = []
-    for doc in scan(es, index="store-click-log", query={
-        "query": {
-            "term": {
-                "userId": user_id
+    try:
+        for doc in scan(es, index="store-click-log", query={
+            "query": {
+                "term": {
+                    "userId": user_id
+                }
             }
-        }
-    }):
-        store_name = doc["_source"].get("storeName")
-        if store_name:
-            clicks.append(store_name)
+        }):
+            store_name = doc["_source"].get("storeName")
+            if store_name:
+                clicks.append(store_name)
+    except Exception as e:
+        logger.error(f"클릭 로그 조회 실패 (user_id: {user_id}: {e})")
 
     # es에서 가져오는 검색 로그
     searches = []
-    for doc in scan(es, index="search-log", query={
-        "query": {
-            "term": {
-                "userId": user_id
-            }
-        }       
-    }):
-        keyword = doc["_source"].get("searchKeyword")
-        if keyword:
-            searches.append(keyword)
-    
+    try:
+        for doc in scan(es, index="search-log", query={
+            "query": {
+                "term": {
+                    "userId": user_id
+                }
+            }       
+        }):
+            keyword = doc["_source"].get("searchKeyword")
+            if keyword:
+                searches.append(keyword)
+    except Exception as e:
+        logger.error(f"검색 로그 조회 실패 (user_id: {user_id}: {e})")
     return categories, histories, bookmarks, clicks, searches
