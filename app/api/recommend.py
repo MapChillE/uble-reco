@@ -1,12 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sentence_transformers import SentenceTransformer
-from sqlalchemy import text, func, cast
+from sqlalchemy import text, func
 from app.database.connection import get_db
-from app.models import Store
+from app.models import Store, Brand
 from app.services.recommend_service import HybridRecommender
 from geoalchemy2.functions import ST_DWithin, ST_SetSRID, ST_MakePoint, ST_Distance
 from geoalchemy2 import Geometry
+from geoalchemy2.shape import to_shape
 import logging
 from app.services.collect_user_data import collect_user_data
 from collections import defaultdict
@@ -29,8 +30,8 @@ def get_min_rank(benefits: list) -> str:
 def extract_lat_lng(store):
     if store.location is None:
         return None, None
-    lng, lat = store.location.coords[0]
-    return lat, lng
+    point = to_shape(store.location)
+    return point.y, point.x
 
 @router.get("/recommend")
 def recommend(
@@ -135,14 +136,9 @@ def hybrid_recommend(
     logger.debug(f"Recommendation results for user {user_id}: {results}")
 
     # 4. 위치 기반 필터링: 추천 브랜드 매장 중 반경 km 이내
-    store_query = db.query(
-        Store.id,
-        Store.brand_id,
-        Store.name,
-        Store.address,
-        Store.phone_number,
-        func.ST_Y(cast(Store.location, Geometry)).label("latitude"),
-        func.ST_X(cast(Store.location, Geometry)).label("longitude")
+    store_query = db.query(Store).options(
+        joinedload(Store.brand).joinedload(Brand.category),
+        joinedload(Store.brand).joinedload(Brand.benefits)
     ).filter(
         Store.brand_id.in_(recommended_brand_ids),
         func.ST_DWithin(Store.location, func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326), radius_km * 1000)
@@ -163,13 +159,14 @@ def hybrid_recommend(
         if brand_id not in store_map:
             continue
         store = store_map[brand_id]
-        brand = db.query(Store).filter(Store.id == store.id).first().brand
+        brand = store.brand
+        lat, lng = extract_lat_lng(store)
 
         item = {
             "storeId": store.id,
             "storeName": store.name,
-            "latitude": store.latitude,
-            "longitude": store.longitude,
+            "latitude": lat,
+            "longitude": lng,
             "category": brand.category.name if brand.category else None,
             "description": brand.description,
             "isVIPcock": brand.rank_type in ("VIP", "VIP_NORMAL"),
