@@ -1,8 +1,14 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+from elasticsearch import Elasticsearch
+from elasticsearch.helpers import scan
+import logging
 
-def collect_user_data(user_id: int, db: Session) -> tuple[list, list, list, list, list]:
-    """Collect user-related text data from various sources."""
+logger = logging.getLogger(__name__)
+
+def collect_user_data(user_id: int, db: Session, es: Elasticsearch) -> tuple[list, list, list, list, list]:
+    
+    #RDB에서 가져오는 데이터
     categories = db.execute(text("""
         SELECT c.name FROM user_category uc
         JOIN category c ON uc.category_id = c.id
@@ -21,14 +27,35 @@ def collect_user_data(user_id: int, db: Session) -> tuple[list, list, list, list
         WHERE bm.user_id = :user_id
     """), {"user_id": user_id}).scalars().all()
 
-    clicks = db.execute(text("""
-        SELECT s.name FROM store_click_log cl
-        JOIN store s ON cl.store_id = s.id
-        WHERE cl.user_id = :user_id
-    """), {"user_id": user_id}).scalars().all()
+    # es에서 가져오는 클릭 로그
+    clicks = []
+    try:
+        for doc in scan(es, index="store-click-log", query={
+            "query": {
+                "term": {
+                    "userId": user_id
+                }
+            }
+        }):
+            store_name = doc["_source"].get("storeName")
+            if store_name:
+                clicks.append(store_name)
+    except Exception as e:
+        logger.error(f"클릭 로그 조회 실패 (user_id: {user_id}: {e})")
 
-    searches = db.execute(text("""
-        SELECT keyword FROM search_log WHERE user_id = :user_id
-    """), {"user_id": user_id}).scalars().all()
-    
+    # es에서 가져오는 검색 로그
+    searches = []
+    try:
+        for doc in scan(es, index="search-log", query={
+            "query": {
+                "term": {
+                    "userId": user_id
+                }
+            }       
+        }):
+            keyword = doc["_source"].get("searchKeyword")
+            if keyword:
+                searches.append(keyword)
+    except Exception as e:
+        logger.error(f"검색 로그 조회 실패 (user_id: {user_id}: {e})")
     return categories, histories, bookmarks, clicks, searches

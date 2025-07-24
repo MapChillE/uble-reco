@@ -4,6 +4,13 @@ from scipy.sparse import coo_matrix
 from implicit.als import AlternatingLeastSquares
 from sqlalchemy.orm import Session
 from app.models import BrandClickLog, StoreClickLog, BrandEmbedding, Store
+from elasticsearch import Elasticsearch
+from elasticsearch.helpers import scan
+from app.database.es import es
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class HybridRecommender:
     def __init__(self):
@@ -12,15 +19,28 @@ class HybridRecommender:
         self.item_factors = None
         self.item_id_to_index = {}
         self.index_to_item_id = {}
+        self.user_id_to_code = {}
+        self.code_to_user_id = {}
+        self.es = es
+
+    # 로그 가져오는 함수
+    def get_logs_from_es(self, index_name: str):
+        logs = []
+        try:
+            for doc in scan(self.es, index=index_name):
+                logs.append(doc["_source"])
+        except Exception as e:
+            logger.error(f"Elasticsearch 로그 조회 실패 (index: {index_name}): {e}")
+        return logs
 
     def train_model(self, db: Session):
-        store_logs = db.query(StoreClickLog).all()
-        brand_logs = db.query(BrandClickLog).all()
+        store_logs = self.get_logs_from_es("store-click-log")
+        brand_logs = self.get_logs_from_es("brand-click-log")
 
         combined_data = []
 
-        # Store 클릭 로그 : brand_id로 매핑
-        store_ids = [log.store_id for log in store_logs]
+        # Store 클릭 로그 : store_id -> brand_id로 매핑
+        store_ids = [log["storeId"] for log in store_logs]
         stores_with_brands = db.query(Store.id, Store.brand_id).filter(
             Store.id.in_(store_ids),
             Store.brand_id.isnot(None)
@@ -29,13 +49,13 @@ class HybridRecommender:
         store_to_brand = {store_id: brand_id for store_id, brand_id in stores_with_brands}
 
         for log in store_logs:
-            brand_id = store_to_brand.get(log.store_id)
+            brand_id = store_to_brand.get(log["storeId"])
             if brand_id:
-                combined_data.append({'user_id': log.user_id, 'brand_id': brand_id})
+                combined_data.append({'user_id': log["userId"], "brand_id": brand_id})
 
         # Brand 클릭 로그
         for log in brand_logs:
-            combined_data.append({'user_id': log.user_id, 'brand_id': log.brand_id}) 
+            combined_data.append({'user_id': log["userId"], "brand_id": log["brandId"]})
 
         if not combined_data:
             return

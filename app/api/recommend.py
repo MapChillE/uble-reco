@@ -1,16 +1,20 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sentence_transformers import SentenceTransformer
-from sqlalchemy import text
+from sqlalchemy import text, func
 from app.database.connection import get_db
-from app.models import Store
+from app.models import Store, Brand
 from app.services.recommend_service import HybridRecommender
 from geoalchemy2.functions import ST_DWithin, ST_SetSRID, ST_MakePoint, ST_Distance
+from geoalchemy2 import Geometry
+from geoalchemy2.shape import to_shape
 import logging
 from app.services.collect_user_data import collect_user_data
 from collections import defaultdict
 from app.database.redis_client import r
 import json
+from app.database.es import es
+
 
 router = APIRouter()
 model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
@@ -23,6 +27,12 @@ def get_min_rank(benefits: list) -> str:
             return b.rank
     return "NONE"
 
+def extract_lat_lng(store):
+    if store.location is None:
+        return None, None
+    point = to_shape(store.location)
+    return point.y, point.x
+
 @router.get("/recommend")
 def recommend(
     user_id:int, 
@@ -33,7 +43,7 @@ def recommend(
     ):
 
     # 1. 사용자 정보 수집
-    categories, histories, bookmarks, clicks, searches = collect_user_data(user_id, db)
+    categories, histories, bookmarks, clicks, searches = collect_user_data(user_id, db, es)
 
     if not (categories or histories or bookmarks or clicks or searches):
         raise HTTPException(status_code=404, detail="사용자 정보가 부족합니다.")
@@ -111,7 +121,7 @@ def hybrid_recommend(
         logger.error(f"Redis 캐시 확인 중 오류: {e}")
 
     # 1. 사용자 텍스트 정보 수집
-    categories, histories, bookmarks, clicks, searches = collect_user_data(user_id, db)
+    categories, histories, bookmarks, clicks, searches = collect_user_data(user_id, db, es)
 
     if not (categories or histories or bookmarks or clicks or searches):
         raise HTTPException(status_code=404, detail="사용자 정보가 부족합니다.")
@@ -126,17 +136,20 @@ def hybrid_recommend(
     logger.debug(f"Recommendation results for user {user_id}: {results}")
 
     # 4. 위치 기반 필터링: 추천 브랜드 매장 중 반경 km 이내
-    nearby_stores = db.query(Store).filter(
-    Store.brand_id.in_(recommended_brand_ids),
-    ST_DWithin(Store.location, ST_SetSRID(ST_MakePoint(lng, lat), 4326), radius_km * 1000)
+    store_query = db.query(Store).options(
+        joinedload(Store.brand).joinedload(Brand.category),
+        joinedload(Store.brand).joinedload(Brand.benefits)
+    ).filter(
+        Store.brand_id.in_(recommended_brand_ids),
+        func.ST_DWithin(Store.location, func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326), radius_km * 1000)
     ).order_by(
-        ST_Distance(Store.location, ST_SetSRID(ST_MakePoint(lng, lat), 4326))
+        func.ST_Distance(Store.location, func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326))
     ).all()
 
     # 매장 중 하나씩 결과 연결
     store_map = {}
     brand_store_map = defaultdict(list)
-    for store in nearby_stores:
+    for store in store_query:
         brand_store_map[store.brand_id].append(store)
     store_map = {bid: stores[0] for bid, stores in brand_store_map.items()}
 
@@ -147,10 +160,13 @@ def hybrid_recommend(
             continue
         store = store_map[brand_id]
         brand = store.brand
+        lat, lng = extract_lat_lng(store)
 
         item = {
             "storeId": store.id,
             "storeName": store.name,
+            "latitude": lat,
+            "longitude": lng,
             "category": brand.category.name if brand.category else None,
             "description": brand.description,
             "isVIPcock": brand.rank_type in ("VIP", "VIP_NORMAL"),
