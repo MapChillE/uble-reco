@@ -164,7 +164,8 @@ def hybrid_recommend(
 
         item = {
             "storeId": store.id,
-            "storeName": store.name,
+            "brandId": brand.id,
+            "name": store.name,
             "latitude": lat,
             "longitude": lng,
             "category": brand.category.name if brand.category else None,
