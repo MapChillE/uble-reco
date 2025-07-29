@@ -17,6 +17,7 @@ myenv/
 __pydantic__/
 
 # === 데이터베이스, 로그 ===
+logs/
 *.db
 *.sqlite3
 *.log
