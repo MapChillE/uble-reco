@@ -17,14 +17,5 @@ if not all([ELASTICSEARCH_URL, ES_ID, ES_PW]):
 es = Elasticsearch(
             ELASTICSEARCH_URL, 
             basic_auth=(ES_ID, ES_PW),
-            verify_certs=True
+            verify_certs=False
     )   
-
-#연결 확인
-try:
-        if not es.ping():
-                raise ConnectionError("Elasticsearch 서버에 연결할 수 없습니다.")
-        logger.info("Elasticsearch 연결 성공")
-except Exception as e:
-        logger.error(f"Elasticsearch 연결 실패: {e}")
-        raise
