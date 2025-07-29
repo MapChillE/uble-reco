@@ -177,9 +177,9 @@ def hybrid_recommend(
         recommendation_items.append(item)
     final_results = {"recommendationsList": recommendation_items}
 
-    # 6. 캐시 저장 (1시간)
+    # 6. 캐시 저장 (20분)
     try:
-        r.setex(cache_key, 3600, json.dumps(final_results))
+        r.setex(cache_key, 1200, json.dumps(final_results))
     except Exception as e:
         logger.error(f"Redis 캐싱 실패: {e}")
 
