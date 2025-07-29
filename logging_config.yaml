@@ -1,0 +1,36 @@
+version: 1
+disable_existing_loggers: False
+
+formatters:
+  json:
+    format: '{"service": "uble-reco", "level": "%(levelname)s", "traceId": "%(traceId)s", "endpoint": "%(endpoint)s", "status": "%(status)s", "latencyMs": "%(latencyMs)s", "message": "%(message)s", "userId": "%(userId)s"}'
+
+filters:
+  context:
+    (): app.logger.ContextFilter
+
+handlers:
+  file:
+    class: logging.handlers.TimedRotatingFileHandler
+    filename: logs/log.json
+    when: midnight
+    interval: 1
+    backupCount: 30
+    formatter: json
+    filters: [context]
+    encoding: utf-8
+
+loggers:
+  uvicorn.error:
+    level: INFO
+    handlers: [file]
+    propagate: False
+
+  app:
+    level: DEBUG
+    handlers: [file]
+    propagate: False
+
+root:
+  level: INFO
+  handlers: [file]
