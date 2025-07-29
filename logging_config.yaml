@@ -11,9 +11,11 @@ filters:
 
 handlers:
   file:
-    class: logging.FileHandler
+    class: logging.handlers.TimedRotatingFileHandler
     filename: logs/log.json
-    mode: a
+    when: midnight
+    interval: 1
+    backupCount: 30
     formatter: json
     filters: [context]
     encoding: utf-8
