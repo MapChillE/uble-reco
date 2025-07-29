@@ -17,5 +17,5 @@ if not all([ELASTICSEARCH_URL, ES_ID, ES_PW]):
 es = Elasticsearch(
             ELASTICSEARCH_URL, 
             basic_auth=(ES_ID, ES_PW),
-            verify_certs=False
+            verify_certs=True
     )   
