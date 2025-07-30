@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 from sentence_transformers import SentenceTransformer
-from sqlalchemy import text, func, cast
+from sqlalchemy import text, func
 from app.database.connection import get_db
 from app.models import Store, Brand
 from app.services.recommend_service import HybridRecommender
 from geoalchemy2.functions import ST_DWithin, ST_SetSRID, ST_MakePoint, ST_Distance
-from geoalchemy2 import Geometry, Geography
+from geoalchemy2 import Geometry
 from geoalchemy2.shape import to_shape
 import logging
 from app.services.collect_user_data import collect_user_data
@@ -133,7 +133,7 @@ def hybrid_recommend(
     # 3. 추천 결과 계산
     results = recommender.get_hybrid_scores(db, user_id, user_vec)
     recommended_brand_ids = [brand_id for brand_id, _ in results]
-    logger.info(f"Recommendation results for user {user_id}: {results}")
+    logger.debug(f"Recommendation results for user {user_id}: {results}")
 
     # 4. 위치 기반 필터링: 추천 브랜드 매장 중 반경 km 이내
     store_query = db.query(Store).options(
@@ -141,16 +141,9 @@ def hybrid_recommend(
         joinedload(Store.brand).joinedload(Brand.benefits)
     ).filter(
         Store.brand_id.in_(recommended_brand_ids),
-        func.ST_DWithin(
-            cast(Store.location, Geography(geometry_type="POINT", srid=4326)),
-            cast(func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326), Geography(geometry_type="POINT", srid=4326)),
-            radius_km * 1000
-        )
+        func.ST_DWithin(Store.location, func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326), radius_km * 1000)
     ).order_by(
-        func.ST_Distance(
-            cast(Store.location, Geography(geometry_type="POINT", srid=4326)),
-            cast(func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326), Geography(geometry_type="POINT", srid=4326))
-        )
+        func.ST_Distance(Store.location, func.ST_SetSRID(func.ST_MakePoint(lng, lat), 4326))
     ).all()
 
     # 매장 중 하나씩 결과 연결
