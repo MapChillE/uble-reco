@@ -1,7 +1,7 @@
 from sqlalchemy import Column, BigInteger, String, TIMESTAMP, ForeignKey, Boolean, Date, Integer, Text
 from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import relationship
-from geoalchemy2 import Geography
+from geoalchemy2 import Geometry, Geography
 from app.database.connection import Base
 
 class Brand(Base):
@@ -61,7 +61,7 @@ class Store(Base):
     created_at = Column(TIMESTAMP)
     modified_at = Column(TIMESTAMP)
     address = Column(String)
-    location = Column(Geography(geometry_type='POINT', srid=4326))
+    location = Column(Geometry(geometry_type='POINT', srid=4326))
     name = Column(String)
     phone_number = Column(String)
     brand_id = Column(BigInteger, ForeignKey("brand.id"))
@@ -129,7 +129,7 @@ class Pin(Base):
     id = Column(BigInteger, primary_key=True)
     created_at = Column(TIMESTAMP)
     modified_at = Column(TIMESTAMP)
-    location = Column(Geography(geometry_type='POINT', srid=4326))
+    location = Column(Geometry(geometry_type='POINT', srid=4326))
     name = Column(String)
     user_id = Column(BigInteger, ForeignKey("users.id"))
 
