@@ -133,7 +133,7 @@ def hybrid_recommend(
         else: 
             logger.info(f"[CACHE][MISS] key={cache_key_masked}")
     except Exception as e:
-        logger.error(f"[CACHE][ERROR] stage=get endpoint={endpoint} userId={user_id} key={cache_key_masked} err={e}", exc_info=True)
+        logger.error(f"[CACHE][ERROR] stage=get key={cache_key_masked} err={e}", exc_info=True)
 
     # 1. 사용자 텍스트 정보 수집
     categories, histories, bookmarks, clicks, searches = collect_user_data(user_id, db, es)
@@ -148,7 +148,7 @@ def hybrid_recommend(
     # 3. 추천 결과 계산
     results = recommender.get_hybrid_scores(db, user_id, user_vec)
     recommended_brand_ids = [brand_id for brand_id, _ in results]
-    logger.debug(f"[RECO][DONE_BRAND] endpoint={endpoint} userId={user_id} resultCount={len(results)}")
+    logger.debug(f"[RECO][DONE_BRAND] resultCount={len(results)}")
 
     # 4. 위치 기반 필터링: 추천 브랜드 매장 중 반경 km 이내
     store_query = db.query(Store).options(
@@ -202,11 +202,12 @@ def hybrid_recommend(
 
     # 6. 캐시 저장 (20분)
     try:
-        r.setex(cache_key, 1200, json.dumps(final_results))
+        ttl_sec = 1200
+        r.setex(cache_key, ttl_sec, json.dumps(final_results))
         latency_ms = int((time.perf_counter() - t0) * 1000)
         logger.info(f"[CACHE][SET] ttl={ttl_sec} latencyMs={latency_ms} key={cache_key_masked}")
     except Exception as e:
-        logger.error(f"[CACHE][ERROR] stage=set endpoint={endpoint} userId={user_id} key={cache_key_masked} err={e}", exc_info=True)
+        logger.error(f"[CACHE][ERROR] stage=set key={cache_key_masked} err={e}", exc_info=True)
 
     # 7. 결과 반환
     return final_results
