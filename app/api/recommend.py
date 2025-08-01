@@ -8,18 +8,19 @@ from app.services.recommend_service import HybridRecommender
 from geoalchemy2.functions import ST_DWithin, ST_SetSRID, ST_MakePoint, ST_Distance
 from geoalchemy2 import Geometry, Geography
 from geoalchemy2.shape import to_shape
-import logging
 from app.services.collect_user_data import collect_user_data
 from collections import defaultdict
 from app.database.redis_client import r
 import json
+import time
+import hashlib
 from app.database.es import es
-
+from app.logger import logging
 
 router = APIRouter()
 model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 recommender = HybridRecommender()
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("app")
 
 def get_min_rank(benefits: list) -> str:
     for b in benefits:
@@ -32,6 +33,11 @@ def extract_lat_lng(store):
         return None, None
     point = to_shape(store.location)
     return point.y, point.x
+
+def mask_key(s: str) -> str:
+    # 키 전체 노출 방지
+    h = hashlib.sha1(s.encode()).hexdigest()[:8]
+    return f"{s[:16]}...#{h}"
 
 @router.get("/recommend")
 def recommend(
@@ -111,14 +117,23 @@ def hybrid_recommend(
     db: Session = Depends(get_db)
 ):
 
+    t0 = time.perf_counter()
+
     # 0. Redis 캐시 확인
     cache_key = f"recommendation:user:{user_id}"
+    cache_key_masked = mask_key(cache_key)
+
     try:
         cached = r.get(cache_key)
         if cached:
+            ttl = r.ttl(cache_key)
+            latency_ms = int((time.perf_counter() - t0) *1000)
+            logger.info(f"[CACHE][HIT] ttl={ttl} latencyMs={latency_ms} key={cache_key_masked}")
             return json.loads(cached)
+        else: 
+            logger.info(f"[CACHE][MISS] key={cache_key_masked}")
     except Exception as e:
-        logger.error(f"Redis 캐시 확인 중 오류: {e}")
+        logger.error(f"[CACHE][ERROR] stage=get key={cache_key_masked} err={e}", exc_info=True)
 
     # 1. 사용자 텍스트 정보 수집
     categories, histories, bookmarks, clicks, searches = collect_user_data(user_id, db, es)
@@ -133,7 +148,7 @@ def hybrid_recommend(
     # 3. 추천 결과 계산
     results = recommender.get_hybrid_scores(db, user_id, user_vec)
     recommended_brand_ids = [brand_id for brand_id, _ in results]
-    logger.info(f"Recommendation results for user {user_id}: {results}")
+    logger.debug(f"[RECO][DONE_BRAND] resultCount={len(results)}")
 
     # 4. 위치 기반 필터링: 추천 브랜드 매장 중 반경 km 이내
     store_query = db.query(Store).options(
@@ -183,12 +198,16 @@ def hybrid_recommend(
         }
         recommendation_items.append(item)
     final_results = {"recommendationsList": recommendation_items}
+    logger.debug(f"[RECO][DONE] endpoint={endpoint} userId={user_id} result={final_results}")
 
     # 6. 캐시 저장 (20분)
     try:
-        r.setex(cache_key, 1200, json.dumps(final_results))
+        ttl_sec = 1200
+        r.setex(cache_key, ttl_sec, json.dumps(final_results))
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        logger.info(f"[CACHE][SET] ttl={ttl_sec} latencyMs={latency_ms} key={cache_key_masked}")
     except Exception as e:
-        logger.error(f"Redis 캐싱 실패: {e}")
+        logger.error(f"[CACHE][ERROR] stage=set key={cache_key_masked} err={e}", exc_info=True)
 
     # 7. 결과 반환
     return final_results
