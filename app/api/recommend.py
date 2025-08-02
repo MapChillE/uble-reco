@@ -131,7 +131,7 @@ def hybrid_recommend(
         if cached:
             ttl = r.ttl(cache_key)
             latency_ms = int((time.perf_counter() - start_time) *1000)
-            logger.info(f"[CACHE][HIT] ttl=$s key=%s", ttl, cache_key_masked, extra={
+            logger.info("[CACHE][HIT] ttl=$s key=%s", ttl, cache_key_masked, extra={
                 "traceId": trace_id,
                 "userId": user_id,
                 "endpoint": endpoint,
@@ -140,7 +140,7 @@ def hybrid_recommend(
             })
             return json.loads(cached)
         else: 
-            logger.info(f"[CACHE][MISS] key=%s", cache_key_masked, extra={
+            logger.info("[CACHE][MISS] key=%s", cache_key_masked, extra={
                 "traceId": trace_id,
                 "userId": user_id,
                 "endpoint": endpoint,
@@ -148,7 +148,7 @@ def hybrid_recommend(
                 "latencyMs": int((time.perf_counter() - start_time)*1000)
             })
     except Exception as e:
-        logger.error(f"[CACHE][ERROR] key=%s err=%s", cache_key_masked, str(e), extra={
+        logger.error("[CACHE][ERROR] key=%s err=%s", cache_key_masked, str(e), extra={
             "traceId": trace_id,
                 "userId": user_id,
                 "endpoint": endpoint,
