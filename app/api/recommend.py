@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session, joinedload
 from sentence_transformers import SentenceTransformer
 from sqlalchemy import text, func, cast
@@ -20,7 +20,7 @@ from app.logger import logging
 router = APIRouter()
 model = SentenceTransformer("sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 recommender = HybridRecommender()
-logger = logging.getLogger("app")
+logger = logging.getLogger(__name__)
 
 def get_min_rank(benefits: list) -> str:
     for b in benefits:
@@ -110,30 +110,51 @@ def startup_event():
 
 @router.get("/recommend/hybrid")
 def hybrid_recommend(
+    request: Request,
     user_id: int, 
     lat: float = Query(37.5),
     lng: float = Query(127.04),
     radius_km: float = Query(2.0),
     db: Session = Depends(get_db)
 ):
-
-    t0 = time.perf_counter()
-
-    # 0. Redis 캐시 확인
+    
+    start_time = time.perf_counter()
+    trace_id = request.headers.get("X-Trace-Id", "-")
+    endpoint = request.url.path
+    
     cache_key = f"recommendation:user:{user_id}"
     cache_key_masked = mask_key(cache_key)
 
+    # 0. Redis 캐시 확인
     try:
         cached = r.get(cache_key)
         if cached:
             ttl = r.ttl(cache_key)
-            latency_ms = int((time.perf_counter() - t0) *1000)
-            logger.info(f"[CACHE][HIT] ttl={ttl} latencyMs={latency_ms} key={cache_key_masked}")
+            latency_ms = int((time.perf_counter() - start_time) *1000)
+            logger.info(f"[CACHE][HIT] ttl=$s key=%s", ttl, cache_key_masked, extra={
+                "traceId": trace_id,
+                "userId": user_id,
+                "endpoint": endpoint,
+                "status": 200,
+                "latencyMs": latency_ms
+            })
             return json.loads(cached)
         else: 
-            logger.info(f"[CACHE][MISS] key={cache_key_masked}")
+            logger.info(f"[CACHE][MISS] key=%s", cache_key_masked, extra={
+                "traceId": trace_id,
+                "userId": user_id,
+                "endpoint": endpoint,
+                "status": 200,
+                "latencyMs": int((time.perf_counter() - start_time)*1000)
+            })
     except Exception as e:
-        logger.error(f"[CACHE][ERROR] stage=get key={cache_key_masked} err={e}", exc_info=True)
+        logger.error(f"[CACHE][ERROR] key=%s err=%s", cache_key_masked, str(e), extra={
+            "traceId": trace_id,
+                "userId": user_id,
+                "endpoint": endpoint,
+                "status": 500,
+                "latencyMs": int((time.perf_counter() - start_time)*1000)
+        })
 
     # 1. 사용자 텍스트 정보 수집
     categories, histories, bookmarks, clicks, searches = collect_user_data(user_id, db, es)
@@ -148,8 +169,13 @@ def hybrid_recommend(
     # 3. 추천 결과 계산
     results = recommender.get_hybrid_scores(db, user_id, user_vec)
     recommended_brand_ids = [brand_id for brand_id, _ in results]
-    logger.debug(f"[RECO][DONE_BRAND] resultCount={len(results)}")
-
+    logger.debug("[RECO][DONE_BRAND] resultCount=%s", len(results), extra={
+        "traceId": trace_id,
+        "userId": user_id,
+        "endpoint": endpoint,
+        "status": 200,
+        "latencyMs": int((time.perf_counter() - start_time) * 1000)
+    })
     # 4. 위치 기반 필터링: 추천 브랜드 매장 중 반경 km 이내
     store_query = db.query(Store).options(
         joinedload(Store.brand).joinedload(Brand.category),
@@ -198,16 +224,34 @@ def hybrid_recommend(
         }
         recommendation_items.append(item)
     final_results = {"recommendationsList": recommendation_items}
-    logger.debug(f"[RECO][DONE] endpoint={endpoint} userId={user_id} result={final_results}")
+    logger.debug("[RECO][DONE] resultCount=%s", len(recommendation_items), extra={
+        "traceId": trace_id,
+        "userId": user_id,
+        "endpoint": endpoint,
+        "status": 200,
+        "latencyMs": int((time.perf_counter() - start_time) * 1000)
+    })
 
     # 6. 캐시 저장 (20분)
     try:
         ttl_sec = 1200
         r.setex(cache_key, ttl_sec, json.dumps(final_results))
-        latency_ms = int((time.perf_counter() - t0) * 1000)
-        logger.info(f"[CACHE][SET] ttl={ttl_sec} latencyMs={latency_ms} key={cache_key_masked}")
+        latency_ms = int((time.perf_counter() - start_time) * 1000)
+        logger.info("[CACHE][SET] ttl=%s key=%s", ttl_sec, cache_key_masked, extra={
+            "traceId": trace_id,
+            "userId": user_id,
+            "endpoint": endpoint,
+            "status": 200,
+            "latencyMs": latency_ms
+        })
     except Exception as e:
-        logger.error(f"[CACHE][ERROR] stage=set key={cache_key_masked} err={e}", exc_info=True)
+        logger.error("[CACHE][ERROR] stage=set key=%s err=%s", cache_key_masked, str(e), extra={
+            "traceId": trace_id,
+            "userId": user_id,
+            "endpoint": endpoint,
+            "status": 500,
+            "latencyMs": int((time.perf_counter() - start_time) * 1000)
+        })
 
     # 7. 결과 반환
     return final_results
