@@ -131,7 +131,7 @@ def hybrid_recommend(
         if cached:
             ttl = r.ttl(cache_key)
             latency_ms = int((time.perf_counter() - start_time) *1000)
-            logger.info("[CACHE][HIT] ttl=$s key=%s", ttl, cache_key_masked, extra={
+            logger.info("[CACHE][HIT] ttl=%s key=%s", ttl, cache_key_masked, extra={
                 "traceId": trace_id,
                 "userId": user_id,
                 "endpoint": endpoint,
