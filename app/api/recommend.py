@@ -233,25 +233,26 @@ def hybrid_recommend(
     })
 
     # 6. 캐시 저장 (20분)
-    try:
-        ttl_sec = 1200
-        r.setex(cache_key, ttl_sec, json.dumps(final_results))
-        latency_ms = int((time.perf_counter() - start_time) * 1000)
-        logger.info("[CACHE][SET] ttl=%s key=%s", ttl_sec, cache_key_masked, extra={
-            "traceId": trace_id,
-            "userId": user_id,
-            "endpoint": endpoint,
-            "status": 200,
-            "latencyMs": latency_ms
-        })
-    except Exception as e:
-        logger.error("[CACHE][ERROR] stage=set key=%s err=%s", cache_key_masked, str(e), extra={
-            "traceId": trace_id,
-            "userId": user_id,
-            "endpoint": endpoint,
-            "status": 500,
-            "latencyMs": int((time.perf_counter() - start_time) * 1000)
-        })
+    if recommendation_items:
+        try:
+            ttl_sec = 1200
+            r.setex(cache_key, ttl_sec, json.dumps(final_results))
+            latency_ms = int((time.perf_counter() - start_time) * 1000)
+            logger.info("[CACHE][SET] ttl=%s key=%s", ttl_sec, cache_key_masked, extra={
+                "traceId": trace_id,
+                "userId": user_id,
+                "endpoint": endpoint,
+                "status": 200,
+                "latencyMs": latency_ms
+            })
+        except Exception as e:
+            logger.error("[CACHE][ERROR] stage=set key=%s err=%s", cache_key_masked, str(e), extra={
+                "traceId": trace_id,
+                "userId": user_id,
+                "endpoint": endpoint,
+                "status": 500,
+                "latencyMs": int((time.perf_counter() - start_time) * 1000)
+            })
 
     # 7. 결과 반환
     return final_results
