@@ -121,7 +121,7 @@ class HybridRecommender:
         db: Session, 
         user_id: int, 
         user_vec: list, 
-        top_k: int = 10
+        top_k: int = 20
     ):
         als_scores = self.get_als_scores(user_id, top_k * 2)
         vec_scores = self.get_vector_scores(db, user_vec, top_k * 2)
